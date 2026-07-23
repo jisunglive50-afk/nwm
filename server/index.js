@@ -1058,23 +1058,63 @@ async function fetchYahooFinanceNewsPage(symbol) {
   return items;
 }
 
+const COMPANY_KEYWORDS = {
+  AAPL: ['AAPL', 'Apple'],
+  NVDA: ['NVDA', 'Nvidia', 'NVIDIA'],
+  TSLA: ['TSLA', 'Tesla'],
+  MSFT: ['MSFT', 'Microsoft'],
+  GOOGL: ['GOOGL', 'GOOG', 'Google', 'Alphabet'],
+  GOOG: ['GOOGL', 'GOOG', 'Google', 'Alphabet'],
+  AMZN: ['AMZN', 'Amazon'],
+  META: ['META', 'Facebook', 'Instagram'],
+  PLTR: ['PLTR', 'Palantir'],
+  AMD: ['AMD', 'Advanced Micro Devices'],
+  INTC: ['INTC', 'Intel'],
+  NFLX: ['NFLX', 'Netflix'],
+  DIS: ['DIS', 'Disney'],
+  COIN: ['COIN', 'Coinbase'],
+  ARM: ['ARM', 'Arm Holdings'],
+  SMCI: ['SMCI', 'Super Micro'],
+  RKLB: ['RKLB', 'Rocket Lab'],
+  SOFI: ['SOFI', 'SoFi'],
+  MSTR: ['MSTR', 'MicroStrategy'],
+  MU: ['MU', 'Micron'],
+  CRWD: ['CRWD', 'CrowdStrike'],
+  SNOW: ['SNOW', 'Snowflake'],
+  UBER: ['UBER', 'Uber'],
+  ABNB: ['ABNB', 'Airbnb'],
+  SHOP: ['SHOP', 'Shopify'],
+  AVGO: ['AVGO', 'Broadcom'],
+  QCOM: ['QCOM', 'Qualcomm'],
+  TSM: ['TSM', 'Taiwan Semiconductor', 'TSMC'],
+  COST: ['COST', 'Costco'],
+  WMT: ['WMT', 'Walmart'],
+  NKE: ['NKE', 'Nike'],
+  PYPL: ['PYPL', 'PayPal'],
+  PANW: ['PANW', 'Palo Alto Networks'],
+  DELL: ['DELL', 'Dell'],
+  SMR: ['SMR', 'NuScale'],
+  MARA: ['MARA', 'Marathon Digital'],
+  RIOT: ['RIOT', 'Riot Platforms'],
+  HOOD: ['HOOD', 'Robinhood'],
+  BA: ['BA', 'Boeing']
+};
+
 /** GET /api/news/:symbol — Multi-Source Yahoo Finance News Aggregator (ALL articles within 3 months) */
 app.get('/api/news/:symbol', async (req, res) => {
   const { symbol } = req.params;
   const symUpper = (symbol || '').toUpperCase();
+  const kwList = COMPANY_KEYWORDS[symUpper] || [symUpper];
 
   try {
     const searchQueries = [
-      symUpper,
       `${symUpper} stock`,
-      `${symUpper} news`,
-      `${symUpper} earnings`,
-      `${symUpper} Wall Street`,
+      kwList[1] ? `${kwList[1]} stock` : `${symUpper} stock news`,
     ];
 
     const [pageNewsItems, ...searchResults] = await Promise.all([
       fetchYahooFinanceNewsPage(symUpper),
-      ...searchQueries.map(q => yf.search(q, { newsCount: 40, quotesCount: 0 }, { validateResult: false }).catch(() => null)),
+      ...searchQueries.map(q => yf.search(q, { newsCount: 30, quotesCount: 0 }, { validateResult: false }).catch(() => null)),
     ]);
 
     const yfSearchItems = [];
@@ -1099,7 +1139,7 @@ app.get('/api/news/:symbol', async (req, res) => {
       }
     }
 
-    const combinedRaw = [...yfSearchItems, ...pageNewsItems];
+    const combinedRaw = [...pageNewsItems, ...yfSearchItems];
     const map = new Map();
     for (const item of combinedRaw) {
       if (item.title && !map.has(item.title.toLowerCase().trim())) {
@@ -1111,17 +1151,24 @@ app.get('/api/news/:symbol', async (req, res) => {
     const now = Date.now();
     const THREE_MONTHS_MS = 90 * 24 * 60 * 60 * 1000;
 
-    // Filter out articles older than 3 months (90 days)
-    const valid3MonthArticles = uniqueNews.filter(item => {
-      if (!item.providerPublishTime) return true;
-      const pubTime = new Date(item.providerPublishTime).getTime();
-      return (now - pubTime) <= THREE_MONTHS_MS;
+    // Strict filter: MUST be within 90 days AND MUST mention symbol/company name
+    const focusedArticles = uniqueNews.filter(item => {
+      // 1. Time check (within 90 days)
+      if (item.providerPublishTime) {
+        const pubTime = new Date(item.providerPublishTime).getTime();
+        if (!isNaN(pubTime) && (now - pubTime) > THREE_MONTHS_MS) return false;
+      }
+
+      // 2. Strict keyword check (must be truly about this stock)
+      const fullText = (item.title + ' ' + (item.summary || '') + ' ' + (item.link || '')).toLowerCase();
+      const isMatch = kwList.some(kw => fullText.includes(kw.toLowerCase()));
+      return isMatch;
     });
 
-    console.log(`📰 Total 3-month news for ${symUpper}: ${valid3MonthArticles.length} articles`);
+    console.log(`📰 Focused 3-month news for ${symUpper}: ${focusedArticles.length} articles`);
 
     const translated = await Promise.all(
-      valid3MonthArticles.map(async (item, idx) => {
+      focusedArticles.slice(0, 30).map(async (item, idx) => {
         const titleTh = await translateToThai(item.title);
         const summaryEn = item.summary || item.title;
         const summaryTh = await translateToThai(summaryEn);
