@@ -268,7 +268,7 @@ async function checkPriceAlerts() {
 setInterval(checkPriceAlerts, 5 * 60 * 1000);
 setTimeout(checkPriceAlerts, 10_000);
 
-app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:4173', 'http://localhost:5174'] }));
+app.use(cors());
 app.use(express.json());
 
 // High Quality Stock Cover Thumbnails Varied Pools per Ticker
